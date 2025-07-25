@@ -1,17 +1,11 @@
-import fetch from 'node-fetch';
-import fs from 'fs';
-import path from 'path';
-import { fileURLToPath } from 'url';
-import OpenAI from 'openai';
+const fetch = require('node-fetch');
+const fs = require('fs');
+const path = require('path');
+const OpenAI = require('openai');
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-// Soluciona correctamente la ruta de prompt.txt incluso tras empaquetado
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const promptBase = fs.readFileSync(path.join(__dirname, 'prompt.txt'), 'utf-8');
-
-export const handler = async (event) => {
+exports.handler = async function (event, context) {
   if (event.httpMethod === 'GET') {
     const params = new URLSearchParams(event.queryStringParameters);
     const mode = params.get('hub.mode');
@@ -26,42 +20,52 @@ export const handler = async (event) => {
   }
 
   if (event.httpMethod === 'POST') {
-    const body = JSON.parse(event.body);
+    try {
+      const body = JSON.parse(event.body);
 
-    if (body.object === 'page') {
-      for (const entry of body.entry) {
-        for (const messagingEvent of entry.messaging) {
-          const senderId = messagingEvent.sender.id;
+      if (body.object === 'page') {
+        for (const entry of body.entry) {
+          for (const messagingEvent of entry.messaging) {
+            const senderId = messagingEvent.sender.id;
 
-          if (messagingEvent.message && messagingEvent.message.text) {
-            const mensajeCliente = messagingEvent.message.text;
+            if (messagingEvent.message && messagingEvent.message.text) {
+              const mensajeCliente = messagingEvent.message.text;
+              console.log('📨 Mensaje recibido:', mensajeCliente);
 
-            const completion = await openai.chat.completions.create({
-              model: 'gpt-3.5-turbo',
-              messages: [
-                { role: 'system', content: promptBase },
-                { role: 'user', content: mensajeCliente }
-              ]
-            });
+              const promptPath = path.join(__dirname, 'prompt.txt');
+              const promptBase = fs.readFileSync(promptPath, 'utf-8');
 
-            const respuestaGPT = completion.choices[0].message.content;
+              const completion = await openai.chat.completions.create({
+                model: 'gpt-3.5-turbo',
+                messages: [
+                  { role: 'system', content: promptBase },
+                  { role: 'user', content: mensajeCliente }
+                ]
+              });
 
-            await fetch(`https://graph.facebook.com/v18.0/me/messages?access_token=${process.env.FACEBOOK_PAGE_ACCESS_TOKEN}`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                recipient: { id: senderId },
-                message: { text: respuestaGPT }
-              })
-            });
+              const respuestaGPT = completion.choices[0].message.content;
+              console.log('🤖 Respuesta GPT:', respuestaGPT);
+
+              await fetch(`https://graph.facebook.com/v18.0/me/messages?access_token=${process.env.FACEBOOK_PAGE_ACCESS_TOKEN}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  recipient: { id: senderId },
+                  message: { text: respuestaGPT }
+                })
+              });
+            }
           }
         }
+
+        return { statusCode: 200, body: 'EVENT_RECEIVED' };
       }
 
-      return { statusCode: 200, body: 'EVENT_RECEIVED' };
+      return { statusCode: 404 };
+    } catch (err) {
+      console.error('❌ Error en webhook POST:', err);
+      return { statusCode: 500, body: 'Internal Server Error' };
     }
-
-    return { statusCode: 404 };
   }
 
   return { statusCode: 405 };
