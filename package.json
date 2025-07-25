@@ -1,0 +1,12 @@
+{
+  "name": "messenger-bot-clean",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "index.js",
+  "scripts": {
+    "start": "echo 'no local start needed'"
+  },
+  "dependencies": {
+    "node-fetch": "^3.4.0"
+  }
+}
