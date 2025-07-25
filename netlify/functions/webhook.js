@@ -6,6 +6,11 @@ import OpenAI from 'openai';
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
+// Soluciona correctamente la ruta de prompt.txt incluso tras empaquetado
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const promptBase = fs.readFileSync(path.join(__dirname, 'prompt.txt'), 'utf-8');
+
 export const handler = async (event) => {
   if (event.httpMethod === 'GET') {
     const params = new URLSearchParams(event.queryStringParameters);
@@ -30,15 +35,6 @@ export const handler = async (event) => {
 
           if (messagingEvent.message && messagingEvent.message.text) {
             const mensajeCliente = messagingEvent.message.text;
-            const __dirname = path.dirname(fileURLToPath(import.meta.url));
-            const promptBase = fs.readFileSync(path.join(__dirname, 'prompt.txt'), 'utf-8');
-
-
-            const promptFinal = `
-${promptBase}
-
-Mensaje del cliente: "${mensajeCliente}"
-`;
 
             const completion = await openai.chat.completions.create({
               model: 'gpt-3.5-turbo',
