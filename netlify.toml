@@ -1,6 +1,6 @@
 [build]
   functions = "netlify/functions"
-  command = "npm install"
+  command = ""  # ← Esto es lo importante: sin comando, porque no construyes nada
 
 [build.environment]
   NODE_VERSION = "18"
