@@ -1,5 +1,7 @@
 import fetch from 'node-fetch';
 import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import OpenAI from 'openai';
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
@@ -28,7 +30,9 @@ export const handler = async (event) => {
 
           if (messagingEvent.message && messagingEvent.message.text) {
             const mensajeCliente = messagingEvent.message.text;
-            const promptBase = fs.readFileSync('./prompt.txt', 'utf-8');
+            const __dirname = path.dirname(fileURLToPath(import.meta.url));
+            const promptBase = fs.readFileSync(path.join(__dirname, 'prompt.txt'), 'utf-8');
+
 
             const promptFinal = `
 ${promptBase}
