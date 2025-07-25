@@ -1,3 +1,9 @@
+import fetch from 'node-fetch';
+import fs from 'fs';
+import OpenAI from 'openai';
+
+const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+
 export const handler = async (event) => {
   if (event.httpMethod === 'GET') {
     const params = new URLSearchParams(event.queryStringParameters);
@@ -17,18 +23,35 @@ export const handler = async (event) => {
 
     if (body.object === 'page') {
       for (const entry of body.entry) {
-        for (const event of entry.messaging) {
-          const senderId = event.sender.id;
+        for (const messagingEvent of entry.messaging) {
+          const senderId = messagingEvent.sender.id;
 
-          if (event.message && event.message.text) {
-            const texto = "Hola 👋, soy tu asistente virtual. ¿En qué puedo ayudarte?";
+          if (messagingEvent.message && messagingEvent.message.text) {
+            const mensajeCliente = messagingEvent.message.text;
+            const promptBase = fs.readFileSync('./prompt.txt', 'utf-8');
+
+            const promptFinal = `
+${promptBase}
+
+Mensaje del cliente: "${mensajeCliente}"
+`;
+
+            const completion = await openai.chat.completions.create({
+              model: 'gpt-3.5-turbo',
+              messages: [
+                { role: 'system', content: promptBase },
+                { role: 'user', content: mensajeCliente }
+              ]
+            });
+
+            const respuestaGPT = completion.choices[0].message.content;
 
             await fetch(`https://graph.facebook.com/v18.0/me/messages?access_token=${process.env.FACEBOOK_PAGE_ACCESS_TOKEN}`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
                 recipient: { id: senderId },
-                message: { text: texto }
+                message: { text: respuestaGPT }
               })
             });
           }
