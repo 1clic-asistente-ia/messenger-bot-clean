@@ -2,7 +2,8 @@
   functions = "netlify/functions"
   command = "npm install"
 
-[functions]
-  node_bundler = "esbuild"
 [build.environment]
   NODE_VERSION = "18"
+
+[functions]
+  node_bundler = "esbuild"
