@@ -53,12 +53,18 @@ export const handler = async (event) => {
             const cliente_id = data[0].cliente_id;
             console.log(`✅ Cliente detectado: ${cliente_id} para PSID: ${senderId}`);
 
-            await supabase.from('mensajes').insert({
-              contenido: mensajeCliente,
-              tipo: 'usuario',
-              cliente_id,
-              metadata: { canal: 'facebook', sender_id: senderId }
-            });
+            try {
+              console.log("➡️ Insertando mensaje de usuario...");
+              await supabase.from('mensajes').insert({
+                contenido: mensajeCliente,
+                tipo: 'usuario',
+                cliente_id,
+                metadata: { canal: 'facebook', sender_id: senderId }
+              });
+              console.log("✅ Mensaje de usuario guardado.");
+            } catch (err) {
+              console.error("❌ Error al insertar mensaje usuario:", err);
+            }
 
             const completion = await openai.chat.completions.create({
               model: process.env.OPENAI_MODEL || 'gpt-3.5-turbo',
@@ -70,12 +76,18 @@ export const handler = async (event) => {
 
             const respuesta = completion.choices[0].message.content;
 
-            await supabase.from('mensajes').insert({
-              contenido: respuesta,
-              tipo: 'asistente',
-              cliente_id,
-              metadata: { canal: 'facebook', sender_id: senderId }
-            });
+            try {
+              console.log("➡️ Insertando respuesta del bot...");
+              await supabase.from('mensajes').insert({
+                contenido: respuesta,
+                tipo: 'asistente',
+                cliente_id,
+                metadata: { canal: 'facebook', sender_id: senderId }
+              });
+              console.log("✅ Respuesta del bot guardada.");
+            } catch (err) {
+              console.error("❌ Error al insertar respuesta del bot:", err);
+            }
 
             await fetch(`https://graph.facebook.com/v18.0/me/messages?access_token=${process.env.FACEBOOK_PAGE_ACCESS_TOKEN}`, {
               method: 'POST',
