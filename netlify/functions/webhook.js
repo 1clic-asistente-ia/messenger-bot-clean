@@ -76,30 +76,35 @@ export const handler = async (event) => {
               ]
             });
 
-            const respuesta = completion.choices[0].message.content;
+            const respuesta = completion.choices[0].message.content?.trim();
+            console.log("💬 Respuesta generada por el bot:", respuesta);
 
-            try {
-              console.log("➡️ Insertando respuesta del bot...");
-              await supabase.from('mensajes').insert({
-                conversacion_id,
-                contenido: respuesta,
-                tipo: 'asistente',
-                cliente_id,
-                metadata: { canal: 'facebook', sender_id: senderId }
+            if (respuesta) {
+              try {
+                console.log("➡️ Insertando respuesta del bot...");
+                await supabase.from('mensajes').insert({
+                  conversacion_id,
+                  contenido: respuesta,
+                  tipo: 'asistente',
+                  cliente_id,
+                  metadata: { canal: 'facebook', sender_id: senderId }
+                });
+                console.log("✅ Respuesta del bot guardada.");
+              } catch (err) {
+                console.error("❌ Error al insertar respuesta del bot:", err);
+              }
+
+              await fetch(`https://graph.facebook.com/v18.0/me/messages?access_token=${process.env.FACEBOOK_PAGE_ACCESS_TOKEN}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  recipient: { id: senderId },
+                  message: { text: respuesta }
+                })
               });
-              console.log("✅ Respuesta del bot guardada.");
-            } catch (err) {
-              console.error("❌ Error al insertar respuesta del bot:", err);
+            } else {
+              console.warn("⚠️ OpenAI no generó una respuesta válida.");
             }
-
-            await fetch(`https://graph.facebook.com/v18.0/me/messages?access_token=${process.env.FACEBOOK_PAGE_ACCESS_TOKEN}`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                recipient: { id: senderId },
-                message: { text: respuesta }
-              })
-            });
           }
         }
       }
