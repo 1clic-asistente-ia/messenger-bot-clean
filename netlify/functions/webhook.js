@@ -40,56 +40,51 @@ export const handler = async (event) => {
           if (messagingEvent.message?.text) {
             const mensajeCliente = messagingEvent.message.text;
 
-            // Buscar cliente_id usando el psid del usuario
             const { data, error } = await supabase
               .from('messenger_users')
               .select('cliente_id')
-              .eq('psid', senderId)
-              .single();
+              .eq('psid', senderId);
 
-            if (!data?.cliente_id) {
-              console.warn(`⚠️ PSID no registrado en messenger_users: ${senderId}`);
-              // El bot sí contesta, pero no se guarda nada en Supabase
-            } else {
-              const cliente_id = data.cliente_id;
-
-              // Guardar mensaje del usuario
-              await supabase.from('mensajes').insert({
-                contenido: mensajeCliente,
-                tipo: 'usuario',
-                cliente_id,
-                metadata: { canal: 'facebook', sender_id: senderId }
-              });
-
-              // Obtener respuesta de OpenAI
-              const completion = await openai.chat.completions.create({
-                model: process.env.OPENAI_MODEL || 'gpt-3.5-turbo',
-                messages: [
-                  { role: 'system', content: promptBase },
-                  { role: 'user', content: mensajeCliente }
-                ]
-              });
-
-              const respuesta = completion.choices[0].message.content;
-
-              // Guardar respuesta del bot
-              await supabase.from('mensajes').insert({
-                contenido: respuesta,
-                tipo: 'asistente',
-                cliente_id,
-                metadata: { canal: 'facebook', sender_id: senderId }
-              });
-
-              // Enviar respuesta a Messenger
-              await fetch(`https://graph.facebook.com/v18.0/me/messages?access_token=${process.env.FACEBOOK_PAGE_ACCESS_TOKEN}`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  recipient: { id: senderId },
-                  message: { text: respuesta }
-                })
-              });
+            if (!data || data.length === 0 || !data[0]?.cliente_id) {
+              console.warn(`❌ PSID no encontrado: ${senderId}`);
+              return { statusCode: 200, body: 'PSID desconocido' };
             }
+
+            const cliente_id = data[0].cliente_id;
+            console.log(`✅ Cliente detectado: ${cliente_id} para PSID: ${senderId}`);
+
+            await supabase.from('mensajes').insert({
+              contenido: mensajeCliente,
+              tipo: 'usuario',
+              cliente_id,
+              metadata: { canal: 'facebook', sender_id: senderId }
+            });
+
+            const completion = await openai.chat.completions.create({
+              model: process.env.OPENAI_MODEL || 'gpt-3.5-turbo',
+              messages: [
+                { role: 'system', content: promptBase },
+                { role: 'user', content: mensajeCliente }
+              ]
+            });
+
+            const respuesta = completion.choices[0].message.content;
+
+            await supabase.from('mensajes').insert({
+              contenido: respuesta,
+              tipo: 'asistente',
+              cliente_id,
+              metadata: { canal: 'facebook', sender_id: senderId }
+            });
+
+            await fetch(`https://graph.facebook.com/v18.0/me/messages?access_token=${process.env.FACEBOOK_PAGE_ACCESS_TOKEN}`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                recipient: { id: senderId },
+                message: { text: respuesta }
+              })
+            });
           }
         }
       }
