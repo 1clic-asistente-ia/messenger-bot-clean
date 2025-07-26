@@ -2,20 +2,17 @@ import { createClient } from '@supabase/supabase-js';
 import axios from 'axios';
 import OpenAI from 'openai';
 
-// Supabase y OpenAI
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL,
   process.env.SUPABASE_SERVICE_ROLE_KEY
 );
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-// Logger estructurado
 function logger(level, message, data = {}) {
   const timestamp = new Date().toISOString();
   console.log(JSON.stringify({ timestamp, level, message, ...data }));
 }
 
-// Prompt base
 const promptBase = `
 Eres un asistente virtual profesional que ayuda a clientes a encontrar llantas. Siempre respondes con cortesía, precisión y un enfoque humano. Nunca pides datos personales. Puedes buscar medidas compatibles si no hay disponibilidad exacta. Si hay problemas técnicos, informa sin inventar respuestas.
 `;
@@ -26,31 +23,25 @@ export const handler = async (event, context) => {
     const mode = event.queryStringParameters['hub.mode'];
     const token = event.queryStringParameters['hub.verify_token'];
     const challenge = event.queryStringParameters['hub.challenge'];
-
-    if (mode && token === VERIFY_TOKEN) {
-      return { statusCode: 200, body: challenge };
-    } else {
-      return { statusCode: 403, body: 'Token inválido' };
-    }
+    if (mode && token === VERIFY_TOKEN) return { statusCode: 200, body: challenge };
+    return { statusCode: 403, body: 'Token inválido' };
   }
 
   if (event.httpMethod === 'POST') {
     try {
       const body = JSON.parse(event.body);
       const messagingEvent = body.entry?.[0]?.messaging?.[0];
-
       const { psid, pageId, mensajeTexto } = validarMensajeEntrante(messagingEvent);
+
       const { cliente_id, conversacion_id } = await obtenerUsuarioYConversacion(psid, pageId);
       const respuestaIA = await generarRespuestaIA(conversacion_id, mensajeTexto);
+
       await enviarMensajeMessenger(psid, respuestaIA);
       await guardarMensajes(conversacion_id, cliente_id, mensajeTexto, respuestaIA);
 
       return { statusCode: 200, body: 'Mensaje procesado' };
     } catch (err) {
-      logger('error', 'Error en webhook', {
-        error: err.message,
-        stack: err.stack,
-      });
+      logger('error', 'Error en webhook', { error: err.message, stack: err.stack });
       return { statusCode: 500, body: 'Error interno del servidor' };
     }
   }
@@ -61,7 +52,6 @@ export const handler = async (event, context) => {
 function validarMensajeEntrante(messagingEvent) {
   if (!messagingEvent?.sender?.id) throw new Error('Falta sender.id');
   if (!messagingEvent?.recipient?.id) throw new Error('Falta recipient.id');
-
   return {
     psid: messagingEvent.sender.id,
     pageId: messagingEvent.recipient.id,
@@ -77,7 +67,6 @@ async function obtenerUsuarioYConversacion(psid, pageId) {
     .single();
 
   if (errorCliente || !cliente) throw new Error('Cliente no encontrado');
-
   const cliente_id = cliente.cliente_id;
 
   const { data: usuario } = await supabase
@@ -151,6 +140,8 @@ async function generarRespuestaIA(conversacion_id, mensajeUsuario) {
     { role: 'user', content: mensajeUsuario },
   ];
 
+  console.log('[DEBUG] messages[] enviados a OpenAI:\n', JSON.stringify(messages, null, 2));
+
   const chatResponse = await openai.chat.completions.create({
     model: process.env.OPENAI_MODEL || 'gpt-3.5-turbo',
     messages,
@@ -188,6 +179,13 @@ async function enviarMensajeMessenger(psid, texto) {
 }
 
 async function guardarMensajes(conversacion_id, cliente_id, mensajeUsuario, mensajeBot) {
+  console.log('[DEBUG] Guardando en Supabase:', {
+    conversacion_id,
+    cliente_id,
+    mensajeUsuario,
+    mensajeBot,
+  });
+
   const { error } = await supabase.from('mensajes').insert([
     {
       conversacion_id,
