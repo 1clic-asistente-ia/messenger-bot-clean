@@ -10,9 +10,11 @@ const supabase = createClient(
 );
 
 const promptBase = `
-Eres un asistente de ventas para una llantera. Tu tarea es ayudar al cliente con preguntas sobre disponibilidad de llantas, precios, medidas compatibles, servicios y ubicación. Siempre responde en un tono amable, claro y profesional. No inventes datos si no los sabes.
+Eres un asistente de ventas para una llantera. Tu tarea es ayudar al cliente con preguntas sobre disponibilidad de llantas, precios, medidas compatibles, servicios y ubicación.
 
-Si el cliente pregunta algo que no entiendes, pídele que reformule o diga la medida de su llanta.
+Responde de forma profesional, clara, amable y CONCISA. Evita rodeos, justificaciones largas o frases innecesarias. Sé útil y directo, como un experto que valora el tiempo del cliente.
+
+Si no entiendes la pregunta, pide amablemente que reformule o que indique la medida de su llanta.
 `;
 
 function sleep(ms) {
@@ -72,10 +74,29 @@ export const handler = async (event) => {
               console.error("❌ Error al insertar mensaje usuario:", err);
             }
 
+            // Cargar últimos 6 mensajes anteriores para memoria corta
+            let historial = [];
+            try {
+              const { data: anteriores } = await supabase
+                .from('mensajes')
+                .select('tipo, contenido')
+                .eq('conversacion_id', conversacion_id)
+                .order('created_at', { ascending: false })
+                .limit(6);
+
+              historial = (anteriores || []).reverse().map(m => ({
+                role: m.tipo === 'usuario' ? 'user' : 'assistant',
+                content: m.contenido
+              }));
+            } catch (err) {
+              console.error("⚠️ Error cargando historial:", err);
+            }
+
             const completion = await openai.chat.completions.create({
               model: process.env.OPENAI_MODEL || 'gpt-3.5-turbo',
               messages: [
                 { role: 'system', content: promptBase },
+                ...historial,
                 { role: 'user', content: mensajeCliente }
               ]
             });
@@ -117,13 +138,11 @@ export const handler = async (event) => {
                 });
               }, 2000);
 
-              // Delay proporcional (máx 8 segundos)
               const delayMs = Math.min(respuesta.length * 300, 8000);
               await sleep(delayMs);
 
-              clearInterval(interval); // detener typing
+              clearInterval(interval);
 
-              // Enviar respuesta al usuario
               await fetch(`https://graph.facebook.com/v18.0/me/messages?access_token=${process.env.FACEBOOK_PAGE_ACCESS_TOKEN}`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
