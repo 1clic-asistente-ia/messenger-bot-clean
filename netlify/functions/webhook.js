@@ -39,6 +39,7 @@ export const handler = async (event) => {
 
           if (messagingEvent.message?.text) {
             const mensajeCliente = messagingEvent.message.text;
+            const conversacion_id = senderId;
 
             const { data, error } = await supabase
               .from('messenger_users')
@@ -56,6 +57,7 @@ export const handler = async (event) => {
             try {
               console.log("➡️ Insertando mensaje de usuario...");
               await supabase.from('mensajes').insert({
+                conversacion_id,
                 contenido: mensajeCliente,
                 tipo: 'usuario',
                 cliente_id,
@@ -79,6 +81,7 @@ export const handler = async (event) => {
             try {
               console.log("➡️ Insertando respuesta del bot...");
               await supabase.from('mensajes').insert({
+                conversacion_id,
                 contenido: respuesta,
                 tipo: 'asistente',
                 cliente_id,
