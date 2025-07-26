@@ -31,8 +31,14 @@ export const handler = async (event, context) => {
     try {
       const body = JSON.parse(event.body);
       const messagingEvent = body.entry?.[0]?.messaging?.[0];
-      const { psid, pageId, mensajeTexto } = validarMensajeEntrante(messagingEvent);
 
+      // 🚨 Filtro crítico para evitar bucles
+      if (messagingEvent?.message?.is_echo) {
+        console.log('[IGNORADO] Mensaje echo del propio bot');
+        return { statusCode: 200, body: 'Ignorado: mensaje echo' };
+      }
+
+      const { psid, pageId, mensajeTexto } = validarMensajeEntrante(messagingEvent);
       const { cliente_id, conversacion_id } = await obtenerUsuarioYConversacion(psid, pageId);
       const respuestaIA = await generarRespuestaIA(conversacion_id, mensajeTexto);
 
