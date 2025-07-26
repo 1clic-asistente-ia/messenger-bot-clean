@@ -105,19 +105,23 @@ export const handler = async (event) => {
                 console.error("❌ Excepción al insertar respuesta del bot:", err);
               }
 
-              // Simular escritura
-              await fetch(`https://graph.facebook.com/v18.0/me/messages?access_token=${process.env.FACEBOOK_PAGE_ACCESS_TOKEN}`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  recipient: { id: senderId },
-                  sender_action: 'typing_on'
-                })
-              });
+              // Mantener efecto de escritura activo cada 2s
+              const interval = setInterval(() => {
+                fetch(`https://graph.facebook.com/v18.0/me/messages?access_token=${process.env.FACEBOOK_PAGE_ACCESS_TOKEN}`, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    recipient: { id: senderId },
+                    sender_action: 'typing_on'
+                  })
+                });
+              }, 2000);
 
-              // Delay proporcional (máximo 8 segundos)
+              // Delay proporcional (máx 8 segundos)
               const delayMs = Math.min(respuesta.length * 300, 8000);
               await sleep(delayMs);
+
+              clearInterval(interval); // detener typing
 
               // Enviar respuesta al usuario
               await fetch(`https://graph.facebook.com/v18.0/me/messages?access_token=${process.env.FACEBOOK_PAGE_ACCESS_TOKEN}`, {
