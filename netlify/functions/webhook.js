@@ -1,15 +1,14 @@
 import fetch from 'node-fetch';
-import fs from 'fs';
-import path from 'path';
-import { fileURLToPath } from 'url';
 import OpenAI from 'openai';
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-const promptBase = fs.readFileSync(
-  path.join(path.dirname(fileURLToPath(import.meta.url)), 'prompt.txt'),
-  'utf-8'
-);
+// Embebemos el prompt directamente aquí para evitar errores de archivo
+const promptBase = `
+Eres un asistente de ventas para una llantera. Tu tarea es ayudar al cliente con preguntas sobre disponibilidad de llantas, precios, medidas compatibles, servicios y ubicación. Siempre responde en un tono amable, claro y profesional. No inventes datos si no los sabes.
+
+Si el cliente pregunta algo que no entiendes, pídele que reformule o diga la medida de su llanta.
+`;
 
 export const handler = async (event) => {
   if (event.httpMethod === 'GET') {
@@ -34,24 +33,24 @@ export const handler = async (event) => {
           const senderId = messagingEvent.sender.id;
 
           if (messagingEvent.message?.text) {
-            const userMessage = messagingEvent.message.text;
+            const mensajeCliente = messagingEvent.message.text;
 
-            const chatResponse = await openai.chat.completions.create({
-              model: 'gpt-3.5-turbo',
+            const completion = await openai.chat.completions.create({
+              model: process.env.OPENAI_MODEL || 'gpt-3.5-turbo',
               messages: [
                 { role: 'system', content: promptBase },
-                { role: 'user', content: userMessage }
+                { role: 'user', content: mensajeCliente }
               ]
             });
 
-            const reply = chatResponse.choices[0].message.content;
+            const respuesta = completion.choices[0].message.content;
 
             await fetch(`https://graph.facebook.com/v18.0/me/messages?access_token=${process.env.FACEBOOK_PAGE_ACCESS_TOKEN}`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
                 recipient: { id: senderId },
-                message: { text: reply }
+                message: { text: respuesta }
               })
             });
           }
