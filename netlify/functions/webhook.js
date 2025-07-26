@@ -10,15 +10,34 @@ const supabase = createClient(
 );
 
 const promptBase = `
-Eres un asistente de ventas para una llantera. Tu tarea es ayudar al cliente con preguntas sobre disponibilidad de llantas, precios, medidas compatibles, servicios y ubicación.
+Eres un asistente de ventas para una llantera. Ayudas al cliente a encontrar llantas usadas disponibles.
 
-Responde de forma profesional, clara, amable y CONCISA. Evita rodeos, justificaciones largas o frases innecesarias. Sé útil y directo, como un experto que valora el tiempo del cliente.
+Si el cliente menciona una medida, aunque esté mal escrita o separada (ej: "250 -40 rin 18"), intenta deducirla y convertirla al formato estándar ###/##R##.
 
-Si no entiendes la pregunta, pide amablemente que reformule o que indique la medida de su llanta.
+Cuando reconozcas una medida válida, llama a la función buscarInventarioCliente({ medida }) para consultar el inventario local (de este cliente).
+
+Responde de forma profesional, amable y CONCISA. No repitas información. Si no entiendes, pide que lo reformule.
 `;
 
 function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+// Buscar en inventario del cliente_id
+async function buscarInventarioCliente({ medida, cliente_id }) {
+  const { data, error } = await supabase
+    .from('inventario')
+    .select('id_llanta, medida, marca, precio')
+    .eq('cliente_id', cliente_id)
+    .eq('medida', medida)
+    .eq('disponibilidad', 'Disponible');
+
+  if (error) {
+    console.error("❌ Error al consultar inventario local:", error.message);
+    return [];
+  }
+
+  return data || [];
 }
 
 export const handler = async (event) => {
@@ -60,100 +79,120 @@ export const handler = async (event) => {
             const cliente_id = data[0].cliente_id;
             console.log(`✅ Cliente detectado: ${cliente_id} para PSID: ${senderId}`);
 
-            try {
-              console.log("➡️ Insertando mensaje de usuario...");
-              await supabase.from('mensajes').insert({
-                conversacion_id,
-                contenido: mensajeCliente,
-                tipo: 'usuario',
-                cliente_id,
-                metadata: { canal: 'facebook', sender_id: senderId }
-              });
-              console.log("✅ Mensaje de usuario guardado.");
-            } catch (err) {
-              console.error("❌ Error al insertar mensaje usuario:", err);
-            }
+            await supabase.from('mensajes').insert({
+              conversacion_id,
+              contenido: mensajeCliente,
+              tipo: 'usuario',
+              cliente_id,
+              metadata: { canal: 'facebook', sender_id: senderId }
+            });
 
-            // Cargar últimos 6 mensajes anteriores para memoria corta
             let historial = [];
-            try {
-              const { data: anteriores } = await supabase
-                .from('mensajes')
-                .select('tipo, contenido')
-                .eq('conversacion_id', conversacion_id)
-                .order('created_at', { ascending: false })
-                .limit(6);
+            const { data: anteriores } = await supabase
+              .from('mensajes')
+              .select('tipo, contenido')
+              .eq('conversacion_id', conversacion_id)
+              .order('created_at', { ascending: false })
+              .limit(6);
 
-              historial = (anteriores || []).reverse().map(m => ({
-                role: m.tipo === 'usuario' ? 'user' : 'assistant',
-                content: m.contenido
-              }));
-            } catch (err) {
-              console.error("⚠️ Error cargando historial:", err);
-            }
+            historial = (anteriores || []).reverse().map(m => ({
+              role: m.tipo === 'usuario' ? 'user' : 'assistant',
+              content: m.contenido
+            }));
 
             const completion = await openai.chat.completions.create({
-              model: process.env.OPENAI_MODEL || 'gpt-3.5-turbo',
+              model: 'gpt-3.5-turbo-1106',
+              tools: [
+                {
+                  type: 'function',
+                  function: {
+                    name: 'buscarInventarioCliente',
+                    description: 'Consulta el inventario local por medida estandarizada',
+                    parameters: {
+                      type: 'object',
+                      properties: {
+                        medida: { type: 'string', description: 'Medida como 205/55R16' },
+                        cliente_id: { type: 'string' }
+                      },
+                      required: ['medida', 'cliente_id']
+                    }
+                  }
+                }
+              ],
               messages: [
                 { role: 'system', content: promptBase },
                 ...historial,
                 { role: 'user', content: mensajeCliente }
-              ]
+              ],
+              tool_choice: 'auto'
             });
 
-            const respuesta = completion.choices[0].message.content?.trim();
-            console.log("💬 Respuesta generada por el bot:", respuesta);
+            const respuesta1 = completion.choices[0];
+            const toolCall = respuesta1?.message?.tool_calls?.[0];
 
-            if (respuesta) {
-              try {
-                console.log("➡️ Insertando respuesta del bot...");
-                const { error: insertError } = await supabase
-                  .from('mensajes')
-                  .insert({
-                    conversacion_id,
-                    contenido: respuesta,
-                    tipo: 'asistente',
-                    cliente_id,
-                    metadata: { canal: 'facebook', sender_id: senderId }
-                  });
+            let respuestaFinal = '';
 
-                if (insertError) {
-                  console.error("❌ Error real al guardar respuesta del bot:", insertError.message);
-                } else {
-                  console.log("✅ Respuesta del bot guardada.");
-                }
-              } catch (err) {
-                console.error("❌ Excepción al insertar respuesta del bot:", err);
-              }
+            if (toolCall?.function?.name === 'buscarInventarioCliente') {
+              const args = JSON.parse(toolCall.function.arguments || '{}');
+              args.cliente_id = cliente_id;
 
-              // Mantener efecto de escritura activo cada 2s
-              const interval = setInterval(() => {
-                fetch(`https://graph.facebook.com/v18.0/me/messages?access_token=${process.env.FACEBOOK_PAGE_ACCESS_TOKEN}`, {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({
-                    recipient: { id: senderId },
-                    sender_action: 'typing_on'
-                  })
-                });
-              }, 2000);
+              const resultados = await buscarInventarioCliente(args);
 
-              const delayMs = Math.min(respuesta.length * 300, 8000);
-              await sleep(delayMs);
+              const segundoTurno = await openai.chat.completions.create({
+                model: 'gpt-3.5-turbo',
+                messages: [
+                  { role: 'system', content: promptBase },
+                  ...historial,
+                  { role: 'user', content: mensajeCliente },
+                  {
+                    role: 'assistant',
+                    tool_calls: [toolCall]
+                  },
+                  {
+                    role: 'tool',
+                    tool_call_id: toolCall.id,
+                    name: 'buscarInventarioCliente',
+                    content: JSON.stringify(resultados)
+                  }
+                ]
+              });
 
-              clearInterval(interval);
+              respuestaFinal = segundoTurno.choices[0].message.content?.trim();
+            } else {
+              respuestaFinal = respuesta1.message?.content?.trim() || '';
+            }
 
-              await fetch(`https://graph.facebook.com/v18.0/me/messages?access_token=${process.env.FACEBOOK_PAGE_ACCESS_TOKEN}`, {
+            await supabase.from('mensajes').insert({
+              conversacion_id,
+              contenido: respuestaFinal,
+              tipo: 'asistente',
+              cliente_id,
+              metadata: { canal: 'facebook', sender_id: senderId }
+            });
+
+            const interval = setInterval(() => {
+              fetch(`https://graph.facebook.com/v18.0/me/messages?access_token=${process.env.FACEBOOK_PAGE_ACCESS_TOKEN}`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                   recipient: { id: senderId },
-                  message: { text: respuesta }
+                  sender_action: 'typing_on'
                 })
               });
-            } else {
-              console.warn("⚠️ OpenAI no generó una respuesta válida.");
-            }
+            }, 2000);
+
+            const delayMs = Math.min(respuestaFinal.length * 300, 8000);
+            await sleep(delayMs);
+            clearInterval(interval);
+
+            await fetch(`https://graph.facebook.com/v18.0/me/messages?access_token=${process.env.FACEBOOK_PAGE_ACCESS_TOKEN}`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                recipient: { id: senderId },
+                message: { text: respuestaFinal }
+              })
+            });
           }
         }
       }
