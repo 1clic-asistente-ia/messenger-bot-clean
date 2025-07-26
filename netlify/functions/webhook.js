@@ -15,6 +15,10 @@ Eres un asistente de ventas para una llantera. Tu tarea es ayudar al cliente con
 Si el cliente pregunta algo que no entiendes, pídele que reformule o diga la medida de su llanta.
 `;
 
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
 export const handler = async (event) => {
   if (event.httpMethod === 'GET') {
     const params = new URLSearchParams(event.queryStringParameters);
@@ -82,7 +86,7 @@ export const handler = async (event) => {
             if (respuesta) {
               try {
                 console.log("➡️ Insertando respuesta del bot...");
-                const { error: insertError, data: insertData } = await supabase
+                const { error: insertError } = await supabase
                   .from('mensajes')
                   .insert({
                     conversacion_id,
@@ -101,6 +105,21 @@ export const handler = async (event) => {
                 console.error("❌ Excepción al insertar respuesta del bot:", err);
               }
 
+              // Simular escritura
+              await fetch(`https://graph.facebook.com/v18.0/me/messages?access_token=${process.env.FACEBOOK_PAGE_ACCESS_TOKEN}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  recipient: { id: senderId },
+                  sender_action: 'typing_on'
+                })
+              });
+
+              // Delay proporcional (máximo 8 segundos)
+              const delayMs = Math.min(respuesta.length * 300, 8000);
+              await sleep(delayMs);
+
+              // Enviar respuesta al usuario
               await fetch(`https://graph.facebook.com/v18.0/me/messages?access_token=${process.env.FACEBOOK_PAGE_ACCESS_TOKEN}`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
