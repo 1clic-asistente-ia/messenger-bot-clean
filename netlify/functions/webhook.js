@@ -5,7 +5,7 @@ const OpenAI = require('openai');
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-exports.handler = async function (event, context) {
+exports.handler = async (event) => {
   if (event.httpMethod === 'GET') {
     const params = new URLSearchParams(event.queryStringParameters);
     const mode = params.get('hub.mode');
@@ -20,52 +20,47 @@ exports.handler = async function (event, context) {
   }
 
   if (event.httpMethod === 'POST') {
-    try {
-      const body = JSON.parse(event.body);
+    const body = JSON.parse(event.body);
 
-      if (body.object === 'page') {
-        for (const entry of body.entry) {
-          for (const messagingEvent of entry.messaging) {
-            const senderId = messagingEvent.sender.id;
+    if (body.object === 'page') {
+      for (const entry of body.entry) {
+        for (const messagingEvent of entry.messaging) {
+          const senderId = messagingEvent.sender.id;
 
-            if (messagingEvent.message && messagingEvent.message.text) {
-              const mensajeCliente = messagingEvent.message.text;
-              console.log('📨 Mensaje recibido:', mensajeCliente);
+          if (messagingEvent.message && messagingEvent.message.text) {
+            const mensajeCliente = messagingEvent.message.text;
 
-              const promptPath = path.join(__dirname, 'prompt.txt');
-              const promptBase = fs.readFileSync(promptPath, 'utf-8');
+            const promptBase = fs.readFileSync(
+              path.join(__dirname, 'prompt.txt'),
+              'utf-8'
+            );
 
-              const completion = await openai.chat.completions.create({
-                model: 'gpt-3.5-turbo',
-                messages: [
-                  { role: 'system', content: promptBase },
-                  { role: 'user', content: mensajeCliente }
-                ]
-              });
+            const completion = await openai.chat.completions.create({
+              model: 'gpt-3.5-turbo',
+              messages: [
+                { role: 'system', content: promptBase },
+                { role: 'user', content: mensajeCliente }
+              ]
+            });
 
-              const respuestaGPT = completion.choices[0].message.content;
-              console.log('🤖 Respuesta GPT:', respuestaGPT);
+            const respuestaGPT = completion.choices[0].message.content;
 
-              await fetch(`https://graph.facebook.com/v18.0/me/messages?access_token=${process.env.FACEBOOK_PAGE_ACCESS_TOKEN}`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  recipient: { id: senderId },
-                  message: { text: respuestaGPT }
-                })
-              });
-            }
+            await fetch(`https://graph.facebook.com/v18.0/me/messages?access_token=${process.env.FACEBOOK_PAGE_ACCESS_TOKEN}`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                recipient: { id: senderId },
+                message: { text: respuestaGPT }
+              })
+            });
           }
         }
-
-        return { statusCode: 200, body: 'EVENT_RECEIVED' };
       }
 
-      return { statusCode: 404 };
-    } catch (err) {
-      console.error('❌ Error en webhook POST:', err);
-      return { statusCode: 500, body: 'Internal Server Error' };
+      return { statusCode: 200, body: 'EVENT_RECEIVED' };
     }
+
+    return { statusCode: 404 };
   }
 
   return { statusCode: 405 };
