@@ -1,22 +1,27 @@
-const { createClient } = require('@supabase/supabase-js');
-const axios = require('axios');
-const OpenAI = require('openai');
+import { createClient } from '@supabase/supabase-js';
+import axios from 'axios';
+import OpenAI from 'openai';
 
-// Instancia Supabase y OpenAI
+// Supabase y OpenAI
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL,
   process.env.SUPABASE_SERVICE_ROLE_KEY
 );
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-// Prompt base del asistente
+// Logger estructurado
+function logger(level, message, data = {}) {
+  const timestamp = new Date().toISOString();
+  console.log(JSON.stringify({ timestamp, level, message, ...data }));
+}
+
+// Prompt base
 const promptBase = `
 Eres un asistente virtual profesional que ayuda a clientes a encontrar llantas. Siempre respondes con cortesía, precisión y un enfoque humano. Nunca pides datos personales. Puedes buscar medidas compatibles si no hay disponibilidad exacta. Si hay problemas técnicos, informa sin inventar respuestas.
 `;
 
-exports.handler = async (event, context) => {
+export const handler = async (event, context) => {
   if (event.httpMethod === 'GET') {
-    // Verificación del Webhook de Facebook
     const VERIFY_TOKEN = process.env.FACEBOOK_VERIFY_TOKEN;
     const mode = event.queryStringParameters['hub.mode'];
     const token = event.queryStringParameters['hub.verify_token'];
@@ -30,38 +35,22 @@ exports.handler = async (event, context) => {
   }
 
   if (event.httpMethod === 'POST') {
-    const body = JSON.parse(event.body);
-
-    if (!body.entry || !body.entry[0].messaging) {
-      return { statusCode: 200, body: 'Sin mensajes relevantes' };
-    }
-
-    const messagingEvent = body.entry[0].messaging[0];
-    const psid = messagingEvent.sender.id;
-    const pageId = messagingEvent.recipient.id;
-    const mensajeTexto = messagingEvent.message?.text;
-
-    if (!mensajeTexto) {
-      return { statusCode: 200, body: 'Sin texto que procesar' };
-    }
-
     try {
-      // Obtener cliente, usuario y conversación
-      const { cliente_id, conversacion_id, messenger_user_id } =
-        await obtenerUsuarioYConversacion(psid, pageId);
+      const body = JSON.parse(event.body);
+      const messagingEvent = body.entry?.[0]?.messaging?.[0];
 
-      // Generar respuesta con OpenAI usando historial
+      const { psid, pageId, mensajeTexto } = validarMensajeEntrante(messagingEvent);
+      const { cliente_id, conversacion_id } = await obtenerUsuarioYConversacion(psid, pageId);
       const respuestaIA = await generarRespuestaIA(conversacion_id, mensajeTexto);
-
-      // Enviar respuesta al usuario
       await enviarMensajeMessenger(psid, respuestaIA);
-
-      // Guardar ambos mensajes en Supabase con cliente_id
       await guardarMensajes(conversacion_id, cliente_id, mensajeTexto, respuestaIA);
 
       return { statusCode: 200, body: 'Mensaje procesado' };
     } catch (err) {
-      console.error('Error en webhook:', err.message);
+      logger('error', 'Error en webhook', {
+        error: err.message,
+        stack: err.stack,
+      });
       return { statusCode: 500, body: 'Error interno del servidor' };
     }
   }
@@ -69,7 +58,17 @@ exports.handler = async (event, context) => {
   return { statusCode: 405, body: 'Método no permitido' };
 };
 
-// Buscar o crear messenger_user y conversación activa
+function validarMensajeEntrante(messagingEvent) {
+  if (!messagingEvent?.sender?.id) throw new Error('Falta sender.id');
+  if (!messagingEvent?.recipient?.id) throw new Error('Falta recipient.id');
+
+  return {
+    psid: messagingEvent.sender.id,
+    pageId: messagingEvent.recipient.id,
+    mensajeTexto: messagingEvent.message?.text || '',
+  };
+}
+
 async function obtenerUsuarioYConversacion(psid, pageId) {
   const { data: cliente, error: errorCliente } = await supabase
     .from('clientes')
@@ -77,9 +76,7 @@ async function obtenerUsuarioYConversacion(psid, pageId) {
     .eq('facebook_page_id', pageId)
     .single();
 
-  if (errorCliente || !cliente) {
-    throw new Error('No se pudo identificar al cliente por pageId');
-  }
+  if (errorCliente || !cliente) throw new Error('Cliente no encontrado');
 
   const cliente_id = cliente.cliente_id;
 
@@ -130,7 +127,6 @@ async function obtenerUsuarioYConversacion(psid, pageId) {
   return { cliente_id, conversacion_id, messenger_user_id };
 }
 
-// Leer historial reciente y generar respuesta con OpenAI
 async function generarRespuestaIA(conversacion_id, mensajeUsuario) {
   const { data: mensajesAnteriores, error } = await supabase
     .from('mensajes')
@@ -140,7 +136,7 @@ async function generarRespuestaIA(conversacion_id, mensajeUsuario) {
     .limit(6);
 
   if (error) {
-    console.error('Error al obtener historial:', error.message);
+    logger('error', 'Error al obtener historial', { error: error.message });
     return 'Lo siento, hubo un error técnico. Intenta más tarde.';
   }
 
@@ -161,25 +157,36 @@ async function generarRespuestaIA(conversacion_id, mensajeUsuario) {
     temperature: 0.7,
   });
 
-  const textoRespuesta = chatResponse.choices[0]?.message?.content?.trim();
-
-  return textoRespuesta || 'Disculpa, no pude generar una respuesta en este momento.';
+  return chatResponse.choices[0]?.message?.content?.trim() ||
+    'Disculpa, no pude generar una respuesta en este momento.';
 }
 
-// Enviar mensaje por Messenger
 async function enviarMensajeMessenger(psid, texto) {
   const PAGE_ACCESS_TOKEN = process.env.FACEBOOK_PAGE_ACCESS_TOKEN;
 
-  await axios.post(
-    `https://graph.facebook.com/v17.0/me/messages?access_token=${PAGE_ACCESS_TOKEN}`,
-    {
-      recipient: { id: psid },
-      message: { text: texto },
+  try {
+    const response = await axios.post(
+      `https://graph.facebook.com/v17.0/me/messages?access_token=${PAGE_ACCESS_TOKEN}`,
+      {
+        recipient: { id: psid },
+        message: { text: texto },
+      }
+    );
+
+    if (response.status !== 200) {
+      throw new Error(`Error al enviar mensaje: ${response.statusText}`);
     }
-  );
+
+    return response.data;
+  } catch (error) {
+    logger('error', 'Error al enviar mensaje a Facebook', {
+      error: error.message,
+      detalle: error.response?.data,
+    });
+    throw error;
+  }
 }
 
-// Guardar mensaje del usuario y respuesta del bot en Supabase con cliente_id
 async function guardarMensajes(conversacion_id, cliente_id, mensajeUsuario, mensajeBot) {
   const { error } = await supabase.from('mensajes').insert([
     {
@@ -197,6 +204,6 @@ async function guardarMensajes(conversacion_id, cliente_id, mensajeUsuario, mens
   ]);
 
   if (error) {
-    console.error('Error al guardar mensajes:', error.message);
+    logger('error', 'Error al guardar mensajes', { error: error.message });
   }
 }

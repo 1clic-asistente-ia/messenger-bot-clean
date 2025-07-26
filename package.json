@@ -1,7 +1,10 @@
 {
+  "name": "messenger-bot-clean",
+  "version": "1.0.0",
   "type": "module",
   "dependencies": {
-    "node-fetch": "^3.3.2",
-    "openai": "^4.27.0"
+    "@supabase/supabase-js": "^2.39.0",
+    "axios": "^1.6.2",
+    "openai": "^4.28.1"
   }
 }
