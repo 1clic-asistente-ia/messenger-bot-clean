@@ -1,3 +1,5 @@
+import axios from 'axios';
+
 export const handler = async (event) => {
   if (event.httpMethod === 'GET') {
     const VERIFY_TOKEN = process.env.FACEBOOK_VERIFY_TOKEN;
@@ -13,38 +15,27 @@ export const handler = async (event) => {
   if (event.httpMethod === 'POST') {
     try {
       const body = JSON.parse(event.body);
+      console.log('[DEBUG] Webhook recibió:', JSON.stringify(body, null, 2));
+
       const messagingEvent = body.entry?.[0]?.messaging?.[0];
       const psid = messagingEvent?.sender?.id;
-      const texto = messagingEvent?.message?.text;
 
-      console.log('[DEBUG] body:', JSON.stringify(body, null, 2));
-      console.log('[DEBUG] psid:', psid);
-      console.log('[DEBUG] texto:', texto);
-
-      // 🚫 Filtro de echo
-      if (messagingEvent?.message?.is_echo) {
-        console.log('[IGNORADO] Echo');
-        return { statusCode: 200, body: 'Echo ignorado' };
+      if (!psid || messagingEvent?.message?.is_echo) {
+        console.log('[IGNORADO] Sin psid o mensaje echo');
+        return { statusCode: 200, body: 'Ignorado' };
       }
 
-      if (!psid || !texto) {
-        console.log('[IGNORADO] Sin texto o sin psid');
-        return { statusCode: 200, body: 'Sin texto válido' };
-      }
-
-      // ✅ Enviar respuesta fija
-      const axios = (await import('axios')).default;
       await axios.post(
         `https://graph.facebook.com/v17.0/me/messages?access_token=${process.env.FACEBOOK_PAGE_ACCESS_TOKEN}`,
         {
           recipient: { id: psid },
-          message: { text: 'Mensaje recibido. Gracias por escribir.' },
+          message: { text: 'Gracias por tu mensaje.' },
         }
       );
 
       return { statusCode: 200, body: 'Mensaje enviado' };
     } catch (err) {
-      console.error('[ERROR]', err.message);
+      console.error('[ERROR EN WEBHOOK]:', err.message);
       return { statusCode: 500, body: 'Error interno' };
     }
   }
