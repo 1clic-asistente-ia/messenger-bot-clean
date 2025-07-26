@@ -82,16 +82,23 @@ export const handler = async (event) => {
             if (respuesta) {
               try {
                 console.log("➡️ Insertando respuesta del bot...");
-                await supabase.from('mensajes').insert({
-                  conversacion_id,
-                  contenido: respuesta,
-                  tipo: 'asistente',
-                  cliente_id,
-                  metadata: { canal: 'facebook', sender_id: senderId }
-                });
-                console.log("✅ Respuesta del bot guardada.");
+                const { error: insertError, data: insertData } = await supabase
+                  .from('mensajes')
+                  .insert({
+                    conversacion_id,
+                    contenido: respuesta,
+                    tipo: 'asistente',
+                    cliente_id,
+                    metadata: { canal: 'facebook', sender_id: senderId }
+                  });
+
+                if (insertError) {
+                  console.error("❌ Error real al guardar respuesta del bot:", insertError.message);
+                } else {
+                  console.log("✅ Respuesta del bot guardada.");
+                }
               } catch (err) {
-                console.error("❌ Error al insertar respuesta del bot:", err);
+                console.error("❌ Excepción al insertar respuesta del bot:", err);
               }
 
               await fetch(`https://graph.facebook.com/v18.0/me/messages?access_token=${process.env.FACEBOOK_PAGE_ACCESS_TOKEN}`, {
