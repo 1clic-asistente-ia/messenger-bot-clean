@@ -2,6 +2,7 @@
   "type": "module",
   "dependencies": {
     "node-fetch": "^3.3.2",
-    "openai": "^4.27.0"
+    "openai": "^4.27.0",
+    "@supabase/supabase-js": "^2.42.5"
   }
 }
