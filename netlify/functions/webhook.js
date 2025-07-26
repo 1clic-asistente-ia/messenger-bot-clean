@@ -56,8 +56,8 @@ exports.handler = async (event, context) => {
       // Enviar respuesta al usuario
       await enviarMensajeMessenger(psid, respuestaIA);
 
-      // Guardar ambos mensajes en Supabase
-      await guardarMensajes(conversacion_id, mensajeTexto, respuestaIA);
+      // Guardar ambos mensajes en Supabase con cliente_id
+      await guardarMensajes(conversacion_id, cliente_id, mensajeTexto, respuestaIA);
 
       return { statusCode: 200, body: 'Mensaje procesado' };
     } catch (err) {
@@ -179,16 +179,18 @@ async function enviarMensajeMessenger(psid, texto) {
   );
 }
 
-// Guardar mensaje del usuario y respuesta del bot en Supabase
-async function guardarMensajes(conversacion_id, mensajeUsuario, mensajeBot) {
+// Guardar mensaje del usuario y respuesta del bot en Supabase con cliente_id
+async function guardarMensajes(conversacion_id, cliente_id, mensajeUsuario, mensajeBot) {
   const { error } = await supabase.from('mensajes').insert([
     {
       conversacion_id,
+      cliente_id,
       contenido: mensajeUsuario,
       tipo: 'usuario',
     },
     {
       conversacion_id,
+      cliente_id,
       contenido: mensajeBot,
       tipo: 'asistente',
     },
