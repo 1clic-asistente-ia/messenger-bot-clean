@@ -46,18 +46,21 @@ Habla como humano. No inventes llantas. Sé útil y directo.
 
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-module.exports = async (req, res) => {
-  if (req.method !== 'POST') return res.status(405).send('Method not allowed');
+exports.handler = async (event, context) => {
+  if (event.httpMethod !== 'POST') {
+    return { statusCode: 405, body: 'Method not allowed' };
+  }
 
-  const body = req.body;
+  const body = JSON.parse(event.body);
   const entry = body.entry?.[0];
   const messaging = entry?.messaging?.[0];
   const psid = messaging?.sender?.id;
   const messageText = messaging?.message?.text?.trim();
 
-  if (!psid || !messageText) return res.status(400).send('Invalid request');
+  if (!psid || !messageText) {
+    return { statusCode: 400, body: 'Invalid request' };
+  }
 
-  // Detectar cliente por PSID
   const { data: userData } = await supabase
     .from('messenger_users')
     .select('cliente_id')
@@ -67,15 +70,9 @@ module.exports = async (req, res) => {
   const clienteId = userData?.cliente_id || 'C0000';
   console.log(`✅ Cliente detectado: ${clienteId} para PSID: ${psid}`);
 
-  // Guardar mensaje del usuario
   const { data: nuevaConversacion } = await supabase
     .from('mensajes')
-    .insert({
-      cliente_id: clienteId,
-      mensaje: messageText,
-      quien_hablo: 'cliente',
-      sender_id: psid,
-    })
+    .insert({ cliente_id: clienteId, mensaje: messageText, quien_hablo: 'cliente', sender_id: psid })
     .select('conversacion_id')
     .single();
 
@@ -95,7 +92,6 @@ module.exports = async (req, res) => {
   const textoFinal = respuestaIA.choices?.[0]?.message?.content || '...';
   console.log('💬 Respuesta generada por el bot:', textoFinal);
 
-  // Simular typing + delay por caracter
   await fetch(`https://graph.facebook.com/v17.0/me/messages?access_token=${process.env.FACEBOOK_PAGE_ACCESS_TOKEN}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -105,14 +101,12 @@ module.exports = async (req, res) => {
   const delayMs = Math.min(4000, textoFinal.length * 30);
   await delay(delayMs);
 
-  // Enviar mensaje final
   await fetch(`https://graph.facebook.com/v17.0/me/messages?access_token=${process.env.FACEBOOK_PAGE_ACCESS_TOKEN}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ recipient: { id: psid }, message: { text: textoFinal } }),
   });
 
-  // Guardar mensaje del bot
   const convId = nuevaConversacion?.conversacion_id;
   await supabase.from('mensajes').insert({
     cliente_id: clienteId,
@@ -123,5 +117,5 @@ module.exports = async (req, res) => {
   });
 
   console.log('✅ Respuesta del bot guardada.');
-  res.sendStatus(200);
+  return { statusCode: 200, body: 'OK' };
 };
