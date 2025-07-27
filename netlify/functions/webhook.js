@@ -1,7 +1,7 @@
 // netlify/functions/webhook.js
-const fetch = require('node-fetch');
-const OpenAI = require('openai');
-const { createClient } = require('@supabase/supabase-js');
+import fetch from 'node-fetch';
+import OpenAI from 'openai';
+import { createClient } from '@supabase/supabase-js';
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 const supabase = createClient(
