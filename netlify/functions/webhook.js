@@ -90,6 +90,8 @@ exports.handler = async (event, context) => {
   });
 
   const textoFinal = respuestaIA.choices?.[0]?.message?.content || '...';
+  // Filtra instrucciones internas tipo [buscarInventarioCliente(...)] antes de mostrar al usuario
+  textoFinal = textoFinal.replace(/\[buscarInventarioCliente\([^\]]*\)\]/g, "");
   console.log('💬 Respuesta generada por el bot:', textoFinal);
 
   await fetch(`https://graph.facebook.com/v17.0/me/messages?access_token=${process.env.FACEBOOK_PAGE_ACCESS_TOKEN}`, {
