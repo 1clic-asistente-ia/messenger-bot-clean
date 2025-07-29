@@ -2,7 +2,6 @@ const fetch = (...args) => import('node-fetch').then(({default: fetch}) => fetch
 const OpenAI = require('openai');
 const { createClient } = require('@supabase/supabase-js');
 
-
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL,
@@ -14,33 +13,22 @@ ROL Y OBJETIVO
 Eres un asesor de ventas experto de una llantera. Tu especialidad son las llantas para autos y camionetas. Eres calmado, directo, eficiente y muy resolutivo.
 
 FILOSOFÍA DE CONVERSACIÓN Y REGLAS CRÍTICAS
-
 1. Múltiples Mensajes Cortos: Habla como en WhatsApp. Divide tus respuestas en burbujas de chat concisas.
-
 2. Sin Presentaciones Innecesarias: NO digas quién eres. Solo responde con amabilidad y claridad.
-
 3. Foco Absoluto en Llantas Automotrices: Si piden llantas de moto, bici o tractor, responde: "Una disculpa, solo manejamos llantas para auto y camioneta."
-
 4. Economía de Palabras: Sé breve.
-
 5. Detector de Trolls: Si hay insultos o bromas, responde exactamente: [END_CONVERSATION]
-
 6. Detecta medidas aunque estén mal escritas: Interpreta cosas como "250 -40 rin 18" y conviértelas a ###/##R##
-
 7. Siempre menciona que los precios están en pesos mexicanos.
+8. Cuando invoques buscarInventarioCliente, devuelve EXACTAMENTE el formato JSON: {"medida":"###/##R##"}
 
 JERARQUÍA DE RESPUESTA
-
 1. Si la consulta es inválida, aclara tus límites.
-
 2. Si detectas una medida válida o deducible: llama a buscarInventarioCliente({ medida })
-
 3. Si no hay stock local: busca medidas compatibles automáticamente.
-
 4. Si tampoco existen compatibles: se consulta red_favoritos (por ahora desactivado).
 
 RESPUESTAS
-
 Habla como humano. No inventes llantas. Sé útil y directo.
 `;
 
@@ -126,8 +114,8 @@ exports.handler = async (event, context) => {
 
     let medidaSolicitada = null;
     try {
-      const argObj = eval('(' + argTexto + ')');
-      medidaSolicitada = argObj.medida;
+      const argObj = JSON.parse(argTexto.replace(/'/g, '"'));
+      medidaSolicitada = argObj?.medida;
     } catch (e) {
       console.error('⚠️ No se pudo parsear la medida:', e);
     }
@@ -205,25 +193,31 @@ exports.handler = async (event, context) => {
   }
 
   const textoFinal = textoGenerado.replace(/\[buscarInventarioCliente\([^\]]*\)\]/g, '');
-    if (!textoFinal || textoFinal.trim() === '') {
-      console.warn('⚠️ El textoFinal está vacío. Se omitirá el envío al usuario.');
-      return { statusCode: 200, body: 'Mensaje vacío ignorado' };
+  if (!textoFinal || textoFinal.trim() === '') {
+    console.warn('⚠️ El textoFinal está vacío. Se omitirá el envío al usuario.');
+    return { statusCode: 200, body: 'Mensaje vacío ignorado' };
+  }
+
+  await fetch(
+    `https://graph.facebook.com/v17.0/me/messages?access_token=${process.env.FACEBOOK_PAGE_ACCESS_TOKEN}`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ recipient: { id: psid }, sender_action: 'typing_on' }),
     }
-    console.log('💡 textoFinal:', textoFinal);
-  await fetch(`https://graph.facebook.com/v17.0/me/messages?access_token=${process.env.FACEBOOK_PAGE_ACCESS_TOKEN}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ recipient: { id: psid }, sender_action: 'typing_on' }),
-  });
+  );
 
   const delayMs = Math.min(4000, textoFinal.length * 30);
   await delay(delayMs);
 
-  await fetch(`https://graph.facebook.com/v17.0/me/messages?access_token=${process.env.FACEBOOK_PAGE_ACCESS_TOKEN}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ recipient: { id: psid }, message: { text: textoFinal } }),
-  });
+  await fetch(
+    `https://graph.facebook.com/v17.0/me/messages?access_token=${process.env.FACEBOOK_PAGE_ACCESS_TOKEN}`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ recipient: { id: psid }, message: { text: textoFinal } }),
+    }
+  );
 
   const convId = nuevaConversacion?.conversacion_id;
   await supabase.from('mensajes').insert({
