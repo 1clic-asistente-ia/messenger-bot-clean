@@ -1,4 +1,3 @@
-// netlify/functions/webhook.js
 import fetch from 'node-fetch';
 import OpenAI from 'openai';
 import { createClient } from '@supabase/supabase-js';
@@ -15,29 +14,29 @@ Eres un asesor de ventas experto de una llantera. Tu especialidad son las llanta
 
 FILOSOFÍA DE CONVERSACIÓN Y REGLAS CRÍTICAS
 
-1. Múltiples Mensajes Cortos: Habla como en WhatsApp. Divide tus respuestas en burbujas de chat concisas. Cada oración principal debe ir separada (doble salto de línea si se desea).
+1. Múltiples Mensajes Cortos: Habla como en WhatsApp. Divide tus respuestas en burbujas de chat concisas.
 
-2. Sin Presentaciones Innecesarias: NO digas quién eres. Solo responde con amabilidad y claridad. Si preguntan tu nombre, di "Estoy aquí para ayudarte, ¿qué necesitas?"
+2. Sin Presentaciones Innecesarias: NO digas quién eres. Solo responde con amabilidad y claridad.
 
-3. Foco Absoluto en Llantas Automotrices: Solo vendes llantas para auto y camioneta. Si te piden llantas de moto, bici, tractor, etc., responde: "Una disculpa, solo manejamos llantas para auto y camioneta."
+3. Foco Absoluto en Llantas Automotrices: Si piden llantas de moto, bici o tractor, responde: "Una disculpa, solo manejamos llantas para auto y camioneta."
 
-4. Economía de Palabras: Sé breve. No uses introducciones largas. "Una disculpa" o "Lamento el inconveniente" es suficiente.
+4. Economía de Palabras: Sé breve.
 
-5. Detector de Trolls y Bromistas: Si alguien se desvía del tema (insultos, bromas, absurdos), responde exactamente: [END_CONVERSATION]
+5. Detector de Trolls: Si hay insultos o bromas, responde exactamente: [END_CONVERSATION]
 
-6. Identifica medidas aunque estén mal escritas: Si el cliente dice "205 60 16" o "llanta 250 -40 rin 18", intenta deducir la medida correcta en formato ###/##R##.
+6. Detecta medidas aunque estén mal escritas: Interpreta cosas como "250 -40 rin 18" y conviértelas a ###/##R##
 
 7. Siempre menciona que los precios están en pesos mexicanos.
 
 JERARQUÍA DE RESPUESTA
 
-1. Si la consulta es inválida o fuera de tu alcance, termina o aclara tus límites.
+1. Si la consulta es inválida, aclara tus límites.
 
 2. Si detectas una medida válida o deducible: llama a buscarInventarioCliente({ medida })
 
-3. Si no hay stock local: busca medidas compatibles en la tabla medidas_compatibles.
+3. Si no hay stock local: busca medidas compatibles automáticamente.
 
-4. Si tampoco existen compatibles: consulta red_favoritos, pero no menciones que es una red. Solo di que está disponible en bodega si el cliente confirma que va.
+4. Si tampoco existen compatibles: se consulta red_favoritos (por ahora desactivado).
 
 RESPUESTAS
 
@@ -62,7 +61,7 @@ exports.handler = async (event, context) => {
     return { statusCode: 400, body: 'Invalid request' };
   }
 
-  // Buscar cliente_id en messenger_users
+  // Buscar cliente_id por PSID
   let clienteId = null;
   const { data: userData } = await supabase
     .from('messenger_users')
@@ -73,7 +72,6 @@ exports.handler = async (event, context) => {
   if (userData?.cliente_id) {
     clienteId = userData.cliente_id;
   } else {
-    // Buscar el cliente_id según el pageId
     const { data: clienteData } = await supabase
       .from('clientes')
       .select('cliente_id')
@@ -82,7 +80,6 @@ exports.handler = async (event, context) => {
 
     clienteId = clienteData?.cliente_id || 'C0000';
 
-    // Insertar nuevo PSID
     await supabase.from('messenger_users').insert([
       {
         psid,
@@ -107,22 +104,106 @@ exports.handler = async (event, context) => {
     .select('conversacion_id')
     .single();
 
-  console.log('➡️ Insertando mensaje de usuario...');
-
   const contexto = [
     { role: 'system', content: promptBase },
     { role: 'user', content: messageText },
   ];
 
-  const respuestaIA = await openai.chat.completions.create({
+  let respuestaIA = await openai.chat.completions.create({
     model: process.env.OPENAI_MODEL || 'gpt-4',
     messages: contexto,
     temperature: 0.7,
   });
 
-  let textoFinal = respuestaIA.choices?.[0]?.message?.content || '...';
-  textoFinal = textoFinal.replace(/\[buscarInventarioCliente\([^\]]*\)\]/g, '');
-  console.log('💬 Respuesta generada por el bot:', textoFinal);
+  let textoGenerado = respuestaIA.choices?.[0]?.message?.content || '...';
+
+  const match = textoGenerado.match(/\[buscarInventarioCliente\((.*?)\)\]/);
+
+  if (match) {
+    console.log('🧠 Se detectó llamada a buscarInventarioCliente');
+    const argTexto = match[1];
+
+    let medidaSolicitada = null;
+    try {
+      const argObj = eval('(' + argTexto + ')');
+      medidaSolicitada = argObj.medida;
+    } catch (e) {
+      console.error('⚠️ No se pudo parsear la medida:', e);
+    }
+
+    let textoLlantas = '';
+    let alternativaUsada = false;
+
+    if (medidaSolicitada) {
+      const { data: stockExacto } = await supabase.rpc('buscar_llantas_anon', {
+        medida: medidaSolicitada,
+        clienteid: clienteId,
+      });
+
+      if (stockExacto?.length > 0) {
+        textoLlantas = stockExacto
+          .map(
+            (llanta) =>
+              `• ${llanta.marca} ${llanta.medida} – ${llanta.estado_fisico} – ${llanta.precio} pesos`
+          )
+          .join('\n\n');
+      } else {
+        console.log('❌ Sin stock exacto. Buscando compatibles...');
+
+        const { data: alternativas } = await supabase
+          .from('medidas_compatibles')
+          .select('medida_alternativa')
+          .eq('medida_original', medidaSolicitada);
+
+        for (const alt of alternativas || []) {
+          const medidaAlt = alt.medida_alternativa;
+          const { data: stockAlt } = await supabase.rpc('buscar_llantas_anon', {
+            medida: medidaAlt,
+            clienteid: clienteId,
+          });
+
+          if (stockAlt?.length > 0) {
+            alternativaUsada = true;
+            textoLlantas = `No tenemos la medida ${medidaSolicitada}, pero esta medida compatible también le queda a tu vehículo:\n\n`;
+
+            textoLlantas += stockAlt
+              .map(
+                (llanta) =>
+                  `• ${llanta.marca} ${llanta.medida} – ${llanta.estado_fisico} – ${llanta.precio} pesos`
+              )
+              .join('\n\n');
+
+            break;
+          }
+        }
+
+        if (!alternativaUsada) {
+          textoLlantas = `Por ahora no tenemos la medida ${medidaSolicitada}, ni una compatible en este momento.`;
+        }
+      }
+
+      const contexto2 = [
+        { role: 'system', content: promptBase },
+        { role: 'user', content: messageText },
+        { role: 'assistant', content: textoGenerado },
+        {
+          role: 'function',
+          name: 'buscarInventarioCliente',
+          content: textoLlantas,
+        },
+      ];
+
+      respuestaIA = await openai.chat.completions.create({
+        model: process.env.OPENAI_MODEL || 'gpt-4',
+        messages: contexto2,
+        temperature: 0.7,
+      });
+
+      textoGenerado = respuestaIA.choices?.[0]?.message?.content || '...';
+    }
+  }
+
+  const textoFinal = textoGenerado.replace(/\[buscarInventarioCliente\([^\]]*\)\]/g, '');
 
   await fetch(`https://graph.facebook.com/v17.0/me/messages?access_token=${process.env.FACEBOOK_PAGE_ACCESS_TOKEN}`, {
     method: 'POST',
