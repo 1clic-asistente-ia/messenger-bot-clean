@@ -1,3 +1,4 @@
+// netlify/functions/webhook.js
 const fetch = (...args) => import('node-fetch').then(({default: fetch}) => fetch(...args));
 const OpenAI = require('openai');
 const { createClient } = require('@supabase/supabase-js');
@@ -34,6 +35,29 @@ Habla como humano. No inventes llantas. Sé útil y directo.
 
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+/* ----------  FUNCIÓN AUXILIAR: MEMORIA DE CONVERSACIÓN  ---------- */
+async function obtenerContextoConversacion(clienteId, limite = 6) {
+  const { data: mensajes } = await supabase
+    .from('mensajes')
+    .select('mensaje, quien_hablo')
+    .eq('cliente_id', clienteId)
+    .order('created_at', { ascending: true })
+    .limit(limite);
+
+  const contexto = [];
+  contexto.push({ role: 'system', content: promptBase });
+
+  (mensajes || []).forEach(m => {
+    contexto.push({
+      role: m.quien_hablo === 'cliente' ? 'user' : 'assistant',
+      content: m.mensaje,
+    });
+  });
+
+  return contexto;
+}
+
+/* ------------------  HANDLER PRINCIPAL  ------------------ */
 exports.handler = async (event, context) => {
   if (event.httpMethod !== 'POST') {
     return { statusCode: 405, body: 'Method not allowed' };
@@ -50,7 +74,7 @@ exports.handler = async (event, context) => {
     return { statusCode: 400, body: 'Invalid request' };
   }
 
-  // Buscar cliente_id por PSID
+  /* 1. Buscar / crear cliente_id */
   let clienteId = null;
   const { data: userData } = await supabase
     .from('messenger_users')
@@ -82,6 +106,7 @@ exports.handler = async (event, context) => {
 
   console.log(`✅ Cliente detectado: ${clienteId} para PSID: ${psid}`);
 
+  /* 2. Guardar mensaje del cliente */
   const { data: nuevaConversacion } = await supabase
     .from('mensajes')
     .insert({
@@ -93,10 +118,9 @@ exports.handler = async (event, context) => {
     .select('conversacion_id')
     .single();
 
-  const contexto = [
-    { role: 'system', content: promptBase },
-    { role: 'user', content: messageText },
-  ];
+  /* 3. Obtener contexto + nuevo mensaje y generar respuesta */
+  const contexto = await obtenerContextoConversacion(clienteId);
+  contexto.push({ role: 'user', content: messageText });
 
   let respuestaIA = await openai.chat.completions.create({
     model: process.env.OPENAI_MODEL || 'gpt-4',
@@ -106,6 +130,7 @@ exports.handler = async (event, context) => {
 
   let textoGenerado = respuestaIA.choices?.[0]?.message?.content || '...';
 
+  /* 4. Detectar y procesar la llamada a buscarInventarioCliente */
   const match = textoGenerado.match(/\[buscarInventarioCliente\((.*?)\)\]/);
 
   if (match) {
@@ -171,15 +196,11 @@ exports.handler = async (event, context) => {
         }
       }
 
+      /* 4-a. Re-generar respuesta incluyendo el resultado de la búsqueda */
       const contexto2 = [
-        { role: 'system', content: promptBase },
-        { role: 'user', content: messageText },
+        ...contexto,
         { role: 'assistant', content: textoGenerado },
-        {
-          role: 'function',
-          name: 'buscarInventarioCliente',
-          content: textoLlantas,
-        },
+        { role: 'function', name: 'buscarInventarioCliente', content: textoLlantas },
       ];
 
       respuestaIA = await openai.chat.completions.create({
@@ -192,12 +213,17 @@ exports.handler = async (event, context) => {
     }
   }
 
-  const textoFinal = textoGenerado.replace(/\[buscarInventarioCliente\([^\]]*\)\]/g, '');
+  /* 5. Limpiar cualquier resto de la llamada y enviar al usuario */
+  const textoFinal = textoGenerado
+    .replace(/\[buscarInventarioCliente\({.*?}\)\]/g, '')
+    .trim();
+
   if (!textoFinal || textoFinal.trim() === '') {
     console.warn('⚠️ El textoFinal está vacío. Se omitirá el envío al usuario.');
     return { statusCode: 200, body: 'Mensaje vacío ignorado' };
   }
 
+  /* 6. Mandar “typing...” a Messenger */
   await fetch(
     `https://graph.facebook.com/v17.0/me/messages?access_token=${process.env.FACEBOOK_PAGE_ACCESS_TOKEN}`,
     {
@@ -210,6 +236,7 @@ exports.handler = async (event, context) => {
   const delayMs = Math.min(4000, textoFinal.length * 30);
   await delay(delayMs);
 
+  /* 7. Enviar texto final al usuario */
   await fetch(
     `https://graph.facebook.com/v17.0/me/messages?access_token=${process.env.FACEBOOK_PAGE_ACCESS_TOKEN}`,
     {
@@ -219,6 +246,7 @@ exports.handler = async (event, context) => {
     }
   );
 
+  /* 8. Guardar respuesta del bot */
   const convId = nuevaConversacion?.conversacion_id;
   await supabase.from('mensajes').insert({
     cliente_id: clienteId,
