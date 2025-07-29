@@ -209,7 +209,7 @@ exports.handler = async (event, context) => {
       console.warn('⚠️ El textoFinal está vacío. Se omitirá el envío al usuario.');
       return { statusCode: 200, body: 'Mensaje vacío ignorado' };
     }
-    console.log('💡 textoFinal:', textoFinal).
+    console.log('💡 textoFinal:', textoFinal);
   await fetch(`https://graph.facebook.com/v17.0/me/messages?access_token=${process.env.FACEBOOK_PAGE_ACCESS_TOKEN}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
