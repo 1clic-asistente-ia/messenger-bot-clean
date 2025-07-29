@@ -1,4 +1,4 @@
-const fetch = require('node-fetch');
+const fetch = (...args) => import('node-fetch').then(({default: fetch}) => fetch(...args));
 const OpenAI = require('openai');
 const { createClient } = require('@supabase/supabase-js');
 
