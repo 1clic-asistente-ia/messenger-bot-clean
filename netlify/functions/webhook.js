@@ -92,7 +92,7 @@ exports.handler = async (event, context) => {
       .maybeSingle();
 
     clienteId = clienteData?.cliente_id || 'C0000';
-
+	console.log('🔍 INSERT mensajes:', { cliente_id: clienteId, mensaje: messageText, quien_hablo: 'cliente' });
     await supabase.from('messenger_users').insert([
       {
         psid,
@@ -248,6 +248,7 @@ exports.handler = async (event, context) => {
 
   /* 8. Guardar respuesta del bot */
   const convId = nuevaConversacion?.conversacion_id;
+  console.log('🔍 INSERT mensajes:', { cliente_id: clienteId, mensaje: messageText, quien_hablo: 'cliente' });
   await supabase.from('mensajes').insert({
     cliente_id: clienteId,
     mensaje: textoFinal,
