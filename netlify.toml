@@ -6,4 +6,7 @@
   external_node_modules = ["node-fetch", "openai", "@supabase/supabase-js"]
 
 [functions."webhook"]
+  external_node_modules = ["openai", "@supabase/supabase-js", "node-fetch"]
+  node_bundler = "esbuild"
+  included_files = []
   runtime = "nodejs20.x"
