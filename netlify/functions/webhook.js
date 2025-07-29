@@ -44,16 +44,13 @@ async function obtenerContextoConversacion(clienteId, limite = 6) {
     .order('created_at', { ascending: true })
     .limit(limite);
 
-  const contexto = [];
-  contexto.push({ role: 'system', content: promptBase });
-
+  const contexto = [{ role: 'system', content: promptBase }];
   (mensajes || []).forEach(m => {
     contexto.push({
       role: m.quien_hablo === 'cliente' ? 'user' : 'assistant',
       content: m.mensaje,
     });
   });
-
   return contexto;
 }
 
@@ -92,7 +89,7 @@ exports.handler = async (event, context) => {
       .maybeSingle();
 
     clienteId = clienteData?.cliente_id || 'C0000';
-	console.log('🔍 INSERT mensajes:', { cliente_id: clienteId, mensaje: messageText, quien_hablo: 'cliente' });
+
     await supabase.from('messenger_users').insert([
       {
         psid,
@@ -107,16 +104,19 @@ exports.handler = async (event, context) => {
   console.log(`✅ Cliente detectado: ${clienteId} para PSID: ${psid}`);
 
   /* 2. Guardar mensaje del cliente */
-  const { data: nuevaConversacion } = await supabase
+  const { data: nuevaConversacion, error: insertErrorCliente } = await supabase
     .from('mensajes')
     .insert({
       cliente_id: clienteId,
       mensaje: messageText,
       quien_hablo: 'cliente',
-      sender_id: psid,
-    })
-    .select('conversacion_id')
-    .single();
+    });
+
+  if (insertErrorCliente) {
+    console.error('❌ Error insertando mensaje cliente:', insertErrorCliente);
+  } else {
+    console.log('✅ Mensaje cliente guardado');
+  }
 
   /* 3. Obtener contexto + nuevo mensaje y generar respuesta */
   const contexto = await obtenerContextoConversacion(clienteId);
@@ -247,15 +247,19 @@ exports.handler = async (event, context) => {
   );
 
   /* 8. Guardar respuesta del bot */
-  const convId = nuevaConversacion?.conversacion_id;
-  console.log('🔍 INSERT mensajes:', { cliente_id: clienteId, mensaje: messageText, quien_hablo: 'cliente' });
-  await supabase.from('mensajes').insert({
-    cliente_id: clienteId,
-    mensaje: textoFinal,
-    quien_hablo: 'asistente',
-    conversacion_id: convId,
-    sender_id: psid,
-  });
+  const { error: insertErrorBot } = await supabase
+    .from('mensajes')
+    .insert({
+      cliente_id: clienteId,
+      mensaje: textoFinal,
+      quien_hablo: 'asistente',
+    });
+
+  if (insertErrorBot) {
+    console.error('❌ Error insertando mensaje bot:', insertErrorBot);
+  } else {
+    console.log('✅ Mensaje bot guardado');
+  }
 
   console.log('✅ Respuesta del bot guardada.');
   return { statusCode: 200, body: 'OK' };
